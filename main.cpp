@@ -74,7 +74,7 @@ int calculateBestPick(int remaining, int limit) {
 
 int main() {
     const int startingToothpicks = 23;
-    const int picksPerTurn = 4;
+    const int picksPerTurn = 3;
     int toothpicksRemaining = startingToothpicks;
 
     bool running = true;
