@@ -12,6 +12,7 @@
 #include <cctype>
 #include <functional>
 #include <iostream>
+#include <optional>
 #include <sstream>
 #include <string>
 
@@ -22,67 +23,62 @@ enum class Difficulty {
     HARD
 };
 
+std::string prompt(const std::string &msg) {
+    std::string input;
+    std::cout << msg;
+    std::cin >> input;
+    return input;
+}
+
+bool isQuitMessage(const std::string &input) {
+    return input == "q" || input == "Q";
+}
+
 // Prompt user for an integer value
-bool promptInt(const std::string& msg, int& intOut) {
-    std::string res = "";
-
-    std::cout << msg;
-    std::cin >> res;
-
+std::optional<int> toInt(const std::string& str) {
     try {
-        intOut = stoi(res);
-        return true;
-    } catch (const std::invalid_argument&) {
-        return false;
+        return std::optional<int>(stoi(str));
+    }
+    catch (const std::invalid_argument&) { }
+    catch (const std::out_of_range&) { }
+    return std::nullopt;
+}
+
+// Returns std::nullopt if user wishes to quit
+std::optional<Difficulty> promptDifficulty() {
+    // Repeat until valid input or quit
+    const auto invalidInput = []() {
+        std::cerr << "Not a difficulty option" << std::endl;
+        return promptDifficulty();
+    };
+
+    std::string input = prompt("Difficulty ('0' = Easy, '1' = Medium, '2' = Hard): ");
+
+    if (isQuitMessage(input)) {
+        return std::nullopt;
+    }
+
+    std::optional<int> inputAsInt = toInt(input);
+
+    if (!inputAsInt.has_value()) {
+        return invalidInput();
+    }
+
+    switch (inputAsInt.value()) {
+    case 0:
+        return Difficulty::EASY;
+    case 1:
+        return Difficulty::MEDIUM;
+    case 2:
+        return Difficulty::HARD;
+    default:
+        return invalidInput();
     }
 }
 
-// Prompt user for a boolean value
-bool promptBool(const std::string& msg, const std::function<bool(std::string)>& cmp) {
-    std::string res = "";
-
-    std::cout << msg;
-    std::cin >> res;
-
-    return cmp(res);
-}
-
-// Prompt user for difficulty
-bool promptDifficulty(Difficulty &difficultyOut) {
-        int res = 0;
-        if (!promptInt("Difficulty ('0' = Easy, '1' = Medium, '2' = Hard): ", res)) {
-            return false;
-        }
-        switch (res) {
-        case 0:
-            difficultyOut = Difficulty::EASY;
-            return true;
-        case 1:
-            difficultyOut = Difficulty::MEDIUM;
-            return true;
-        case 2:
-            difficultyOut = Difficulty::HARD;
-            return true;
-        default:
-            return false;
-        }
-}
-
-// Ask the user if they wish to keep playing
-bool promptContinue() {
-    return promptBool("Would you like to play again? (y/n): ", [](std::string input) -> bool {
-        return input == "y" || input == "Y";
-    }); 
-}
-
-// Remove toothpicks from pile if legal
-bool makePick(int &remaining, int pick, int limit) {
-    if (pick < 1 || pick > limit || pick > remaining) {
-        return false;
-    }
-
-    remaining -= pick;
-    return true;
+// Check if pick is legal
+bool validatePick(int remaining, int pick, int limit) {
+    return pick > 0 && pick <= limit && pick <= remaining;
 }
 
 int generateRandomPick(int limit) {
@@ -112,8 +108,32 @@ int generateComputerPick(Difficulty difficulty, int remaining, int limit) {
             pick = rand() % 2 ? pick : generateRandomPick(limit); // Pick randomly half the time
             break;
         }
+        // Keep best pick if on hard
     }
     return pick;
+}
+
+// Return std::nullopt if user wishes to quit
+std::optional<int> getHumanPick(int remaining, int limit) {
+    std::stringstream ss;
+    ss << "How many will you choose? (1-" << limit << "): ";
+
+    std::string input = prompt(ss.str());
+
+    if (isQuitMessage(input)) {
+        return std::nullopt;
+    }
+
+    std::optional<int> inputAsInt = toInt(input);
+
+    // Repeat until user enters a valid pick or quits
+    if (!inputAsInt.has_value() || !validatePick(remaining, inputAsInt.value(), limit)) {
+        std::cout << "Your pick was not valid" << std::endl;
+        std::cout << "Toothpicks remaining: " << remaining << std::endl;
+        return getHumanPick(remaining, limit);
+    }
+
+    return inputAsInt.value();
 }
 
 int main() {
@@ -123,57 +143,71 @@ int main() {
     const int startingToothpicks = 23;
     const int picksPerTurn = 3;
 
+    // Main loop
     bool running = true;
     while (running) {
         int toothpicksRemaining = startingToothpicks;
 
+        std::cout << std::endl << "Enter 'q' at any time to quit" << std::endl << std::endl;
+
         // Prompt user for difficulty
-        Difficulty difficulty = Difficulty::EASY;
-        while (!promptDifficulty(difficulty)) {
-            std::cerr << "Not a valid difficulty" << std::endl;
-        }
-
-        bool gameOver = false;
-        while (!gameOver) {
-            int userPick = 0;
-
-            std::cout << "Toothpicks remaining: " << toothpicksRemaining << std::endl;
-            // Prompt user for pick
-            std::stringstream ss;
-            ss << "How many will you choose? (1-" << picksPerTurn << "): ";
-            while (!promptInt(ss.str(), userPick) || !makePick(toothpicksRemaining, userPick, picksPerTurn)) {
-                std::cout << "Your pick was not valid" << std::endl;
+        Difficulty difficulty = [&running]() {
+            std::optional<Difficulty> d = promptDifficulty();
+            if (!d.has_value()) {
+                running = false;
             }
+            return d.value_or(Difficulty::EASY);
+        }();
 
-            std::cout << "Toothpicks remaining: " << toothpicksRemaining << std::endl;
-
-            // Check if a winner can be decided
-            // If yes, restart or quit
-            if (toothpicksRemaining == 1) {
-                std::cout << "Human wins!" << std::endl;
-                gameOver = true;
-                continue;
-            } else if (toothpicksRemaining == 0) {
-                std::cout << "Computer wins!" << std::endl;
-                gameOver = true;
-                continue;
-            }
-
-            int computerPick = generateComputerPick(difficulty, toothpicksRemaining, picksPerTurn);
-            std::cout << "Computer picks " << computerPick << std::endl;
-            makePick(toothpicksRemaining, computerPick, picksPerTurn);
-
-            // Check if the computer has made a winning pick
-            if (toothpicksRemaining == 1) {
+        if (running) {
+            // Individual game loop
+            bool gameOver = false;
+            while (!gameOver) {
+                // Human's turn
                 std::cout << "Toothpicks remaining: " << toothpicksRemaining << std::endl;
-                std::cout << "Computer wins!" << std::endl;
-                gameOver = true;
-                continue;
+                std::optional<int> input = getHumanPick(toothpicksRemaining, picksPerTurn);
+                if (!input.has_value()) {
+                    gameOver = true;
+                    running = false;
+                }
+                else {
+                    toothpicksRemaining -= input.value();
+                }
+
+                // Computer's turn
+                if (!gameOver) {
+                    std::cout << "Toothpicks remaining: " << toothpicksRemaining << std::endl;
+
+                    // Check if a winner can be decided
+                    // If yes, restart or quit
+                    if (toothpicksRemaining == 1) {
+                        std::cout << "Human wins!" << std::endl;
+                        gameOver = true;
+                    } else if (toothpicksRemaining == 0) {
+                        std::cout << "Computer wins!" << std::endl;
+                        gameOver = true;
+                    }
+                }
+
+                if (!gameOver) {
+                    int computerPick = generateComputerPick(difficulty, toothpicksRemaining, picksPerTurn);
+                    std::cout << "Computer picks " << computerPick << std::endl;
+                    toothpicksRemaining -= computerPick;
+
+                    // Check if the computer has made a winning pick
+                    if (toothpicksRemaining == 1) {
+                        std::cout << "Toothpicks remaining: " << toothpicksRemaining << std::endl;
+                        std::cout << "Computer wins!" << std::endl;
+                        gameOver = true;
+                    }
+                }
             }
         }
 
         // Ask the user if they want to play again
-        running = promptContinue();
+        if (running) running = [](const std::string &input) {
+            return input == "y" || input == "Y";
+        }(prompt("Would you like to play again? (y/n): "));;
     }
 
     std::cout << "Thanks for playing!" << std::endl;
